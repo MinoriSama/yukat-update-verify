@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><Description>Verify RSA-PSS signed update manifests and local package integrity.</Description></PropertyGroup>
+</Project>
