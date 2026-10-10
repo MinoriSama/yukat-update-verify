@@ -1,3 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><Description>Verify RSA-PSS signed update manifests and local package integrity.</Description></PropertyGroup>
+  <PropertyGroup>
+    <Description>Verify RSA-PSS signed update metadata, expiry and local package integrity.</Description>
+    <PackageId>Yukat.UpdateVerify</PackageId>
+    <Authors>MinoriSama</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/MinoriSama/yukat-update-verify</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>update;verification;security;rsa</PackageTags>
+    <IncludeSymbols>true</IncludeSymbols><SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl><EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+  <ItemGroup><None Include="../../README.md" Pack="true" PackagePath="/" /></ItemGroup>
 </Project>

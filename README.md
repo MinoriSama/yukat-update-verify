@@ -2,7 +2,7 @@
 
 A small .NET 8 library and command-line tool for verifying RSA-PSS signed update metadata and the integrity of a local update package. No third-party runtime packages.
 
-Version 0.1.0. Licensed under [MIT](LICENSE). This tool has not been independently audited or integrated into production YuKat.
+Version 0.2.0 candidate. Licensed under [MIT](LICENSE). This tool has not been independently audited or integrated into production YuKat.
 
 ## What it checks
 
@@ -11,6 +11,7 @@ Version 0.1.0. Licensed under [MIT](LICENSE). This tool has not been independent
 - A bounded JSON manifest with exactly five fields; no duplicate or unknown fields.
 - Signed package length and SHA-256, streamed without loading the package into memory.
 - An optional trusted version floor, rejecting equal or older numeric versions.
+- Explicit V2 mode: signed issuance/expiry, metadata counter, conflicting replay and trusted clock rollback checks. The application owns protected state.
 
 It does **not** download, install or execute packages. It does not infer trust from a key supplied in the manifest. It does not replace Authenticode, TUF, malware scanning, or secure key custody.
 
@@ -23,7 +24,7 @@ dotnet build src/Yukat.UpdateVerify.Cli -c Release
 dotnet run --project tests/Yukat.UpdateVerify.Tests -c Release
 ```
 
-The dependency-free test executable exits nonzero on a failed assertion. It is run with `dotnet run`, not `dotnet test`. A Windows/Linux GitHub Actions workflow is prepared; it has not run until publication.
+The dependency-free test executable exits nonzero on a failed assertion. It is run with `dotnet run`, not `dotnet test`. The Windows/Linux GitHub Actions workflow verifies changes. Local candidate builds and package validation run on the Windows build PC.
 
 ## Try a synthetic signed example
 
@@ -63,3 +64,20 @@ See [protocol](docs/PROTOCOL.md) and [security boundaries](SECURITY.md). The sig
 ## Project status
 
 This is a reusable component derived from the verification needs of YuKat. No production keys, customer data, VPN engines, application UI, or deployment credentials are included. There are no claims of third-party adoption or downloads. Current verification evidence is in [VALIDATION.md](VALIDATION.md).
+
+## Install the prepared packages
+
+The 0.2.0 candidate is not yet published on NuGet.org. Use its reviewed local feed:
+
+```sh
+dotnet add package Yukat.UpdateVerify --version 0.2.0 --source ./artifacts/packages
+dotnet tool install Yukat.UpdateVerify.Tool --version 0.2.0 --tool-path ./artifacts/tool --add-source ./artifacts/packages
+```
+
+The tool command is `yukat-update-verify`; pass `--fresh` before the normal arguments to require V2 signed expiry. The CLI does not persist counter state. Applications should use the library API with a caller-provisioned `FreshnessPolicy` and protected high-watermark state.
+
+A working [minimal application](examples/MinimalApp) consumes the packed NuGet library, rather than a project reference. It performs a first fresh check and verifies package bytes without executing them. For subsequent checks, protect the last metadata counter, exact metadata SHA256 and trusted check time. Commit that state only after the corresponding package has passed verification. A rollback of that state or a compromised local clock weakens freshness protection.
+
+V1 metadata remains intentionally compatible and has no signed expiry. `VerifyFreshManifest` rejects V1 instead of silently downgrading. V2 includes exactly eight fields and signs domain `YUKAT-UPDATE-V2`, then the V1 four-line descriptor, then issuance UTC, expiry UTC and invariant counter. Times use UTC seconds; metadata lifetime is capped at seven days. The same fresh metadata bytes can be retried for an interrupted download, but a different digest at the same trusted counter is rejected.
+
+See the [key rotation plan](docs/KEY-ROTATION.md) and [independent review kit](docs/INDEPENDENT-REVIEW.md). No independent review or NuGet.org publication is claimed.

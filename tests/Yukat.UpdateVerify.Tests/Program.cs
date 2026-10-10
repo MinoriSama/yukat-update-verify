@@ -89,6 +89,41 @@ Accept("nonseekable chunked stream stays open", async () =>
     await UpdateVerifier.VerifyPackageAsync(Verify(signed), stream);
     if (!stream.CanRead) throw new Exception("Caller stream was closed.");
 });
+var now = new DateTimeOffset(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
+byte[] SignedV2(long counter = 1, DateTimeOffset? issued = null, DateTimeOffset? expires = null, string version = "1.2.3")
+{
+    var issuedAtUtc = (issued ?? now).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+    var expiresAtUtc = (expires ?? now.AddDays(1)).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+    const string url = "https://updates.example.org/package.bin";
+    var canonical = string.Join('\n', "YUKAT-UPDATE-V2", version, url, hash, payload.Length.ToString(CultureInfo.InvariantCulture), issuedAtUtc, expiresAtUtc, counter.ToString(CultureInfo.InvariantCulture));
+    var signature = Convert.ToBase64String(signingKey.SignData(Encoding.UTF8.GetBytes(canonical), HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
+    return JsonSerializer.SerializeToUtf8Bytes(new { version, url, sha256 = hash, size = payload.Length, signature, issuedAtUtc, expiresAtUtc, metadataVersion = counter });
+}
+Task Fresh(byte[] bytes, FreshnessPolicy? policy = null) { UpdateVerifier.VerifyFreshManifest(bytes, publicKey, ["updates.example.org"], policy ?? new(now)); return Task.CompletedTask; }
+Accept("fresh V2 metadata and package", async () => await UpdateVerifier.VerifyPackageAsync(UpdateVerifier.VerifyFreshManifest(SignedV2(), publicKey, ["updates.example.org"], new(now)), new MemoryStream(payload)));
+Reject("expired signed V2", () => Fresh(SignedV2(issued: now.AddDays(-2), expires: now)));
+Reject("future-dated signed V2", () => Fresh(SignedV2(issued: now.AddMinutes(6))));
+Reject("excessive signed lifetime", () => Fresh(SignedV2(expires: now.AddDays(8))));
+Reject("expiry before issuance", () => Fresh(SignedV2(expires: now.AddSeconds(-1))));
+Reject("metadata counter rollback", () => Fresh(SignedV2(), new(now, MinimumMetadataVersion: 2)));
+Reject("equal counter without trusted digest", () => Fresh(SignedV2(), new(now, MinimumMetadataVersion: 1)));
+Reject("zero counter", () => Fresh(SignedV2(counter: 0)));
+Reject("trusted clock rollback", () => Fresh(SignedV2(), new(now, LastTrustedUtc: now.AddMinutes(1))));
+Reject("legacy verifier never silently accepts V2", () => CheckManifest(SignedV2()));
+Reject("fresh verifier never silently accepts legacy", () => Fresh(signed));
+Accept("identical fresh replay allowed for interrupted download", () => {
+    var bytes = SignedV2(); var accepted = UpdateVerifier.VerifyFreshManifest(bytes, publicKey, ["updates.example.org"], new(now));
+    return Fresh(bytes, new(now, 1, accepted.MetadataSha256, now));
+});
+Reject("conflicting same-counter replay", () => {
+    var accepted = UpdateVerifier.VerifyFreshManifest(SignedV2(), publicKey, ["updates.example.org"], new(now));
+    return Fresh(SignedV2(version: "1.2.4"), new(now, 1, accepted.MetadataSha256, now));
+});
+Reject("tampered expiry", () => {
+    var node = JsonNode.Parse(SignedV2())!.AsObject(); node["expiresAtUtc"] = now.AddDays(2).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+    return Fresh(Encoding.UTF8.GetBytes(node.ToJsonString()));
+});
+Reject("duplicate metadata counter", () => Fresh(Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(SignedV2()).Replace("{", "{\"metadataVersion\":999,"))));
 var failed = 0;
 foreach (var (name, run) in checks)
 {
@@ -99,6 +134,8 @@ Console.WriteLine($"{checks.Count - failed}/{checks.Count} passed");
 if (failed == 0 && args is ["--example", var directory])
 {
     Directory.CreateDirectory(directory);
+    var generatedAt = DateTimeOffset.UtcNow;
+    File.WriteAllBytes(Path.Combine(directory, "fresh-manifest.json"), SignedV2(issued: generatedAt, expires: generatedAt.AddDays(1)));
     await File.WriteAllBytesAsync(Path.Combine(directory, "manifest.json"), signed);
     await File.WriteAllTextAsync(Path.Combine(directory, "trusted-public.pem"), publicKey);
     await File.WriteAllBytesAsync(Path.Combine(directory, "package.bin"), payload);

@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><PackAsTool>true</PackAsTool><ToolCommandName>yukat-update-verify</ToolCommandName><PackageId>Yukat.UpdateVerify.Tool</PackageId><Authors>MinoriSama</Authors><PackageLicenseExpression>MIT</PackageLicenseExpression><Description>Verify signed update metadata and local package integrity without execution.</Description></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Yukat.UpdateVerify/Yukat.UpdateVerify.csproj" /></ItemGroup>
 </Project>

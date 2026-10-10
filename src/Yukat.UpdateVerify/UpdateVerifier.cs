@@ -8,17 +8,21 @@ namespace Yukat.UpdateVerify;
 /// <summary>A descriptor whose metadata signature has been verified. This does not verify a package.</summary>
 public sealed class VerifiedManifest
 {
-    internal VerifiedManifest(Version version, Uri url, byte[] hash, long size)
+    internal VerifiedManifest(Version version, Uri url, byte[] hash, long size, long? metadataVersion = null, DateTimeOffset? expiresAtUtc = null, string? metadataSha256 = null)
     {
         Version = version;
         Url = url;
         Sha256 = Convert.ToHexString(hash).ToLowerInvariant();
         Size = size;
+        MetadataVersion = metadataVersion; ExpiresAtUtc = expiresAtUtc; MetadataSha256 = metadataSha256;
     }
     public Version Version { get; }
     public Uri Url { get; }
     public string Sha256 { get; }
     public long Size { get; }
+    public long? MetadataVersion { get; }
+    public DateTimeOffset? ExpiresAtUtc { get; }
+    public string? MetadataSha256 { get; }
 }
 
 public static class UpdateVerifier
@@ -30,6 +34,20 @@ public static class UpdateVerifier
     public static VerifiedManifest VerifyManifest(
         ReadOnlySpan<byte> json, string trustedPublicKeyPem, IEnumerable<string> allowedHosts,
         Version? minimumExclusiveVersion = null, long maximumPackageBytes = DefaultMaximumPackageBytes)
+        => VerifyCore(json, trustedPublicKeyPem, allowedHosts, minimumExclusiveVersion, maximumPackageBytes, null);
+
+    /// <summary>V2 metadata requires signed expiry, a monotonic counter and caller-owned trusted state.</summary>
+    public static VerifiedManifest VerifyFreshManifest(
+        ReadOnlySpan<byte> json, string trustedPublicKeyPem, IEnumerable<string> allowedHosts,
+        FreshnessPolicy freshness, Version? minimumExclusiveVersion = null,
+        long maximumPackageBytes = DefaultMaximumPackageBytes)
+    {
+        ArgumentNullException.ThrowIfNull(freshness);
+        return VerifyCore(json, trustedPublicKeyPem, allowedHosts, minimumExclusiveVersion, maximumPackageBytes, freshness);
+    }
+
+    private static VerifiedManifest VerifyCore(ReadOnlySpan<byte> json, string trustedPublicKeyPem,
+        IEnumerable<string> allowedHosts, Version? minimumExclusiveVersion, long maximumPackageBytes, FreshnessPolicy? freshness)
     {
         if (json.Length == 0 || json.Length > MaximumManifestBytes)
             throw new InvalidDataException("Manifest is empty or exceeds the size limit.");
@@ -44,10 +62,12 @@ public static class UpdateVerifier
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var field in root.EnumerateObject())
         {
-            if (field.Name is not ("version" or "url" or "sha256" or "size" or "signature") || !names.Add(field.Name))
+            var known = field.Name is "version" or "url" or "sha256" or "size" or "signature"
+                || freshness is not null && field.Name is "issuedAtUtc" or "expiresAtUtc" or "metadataVersion";
+            if (!known || !names.Add(field.Name))
                 throw new InvalidDataException("Unknown or duplicate manifest field.");
         }
-        if (names.Count != 5) throw new InvalidDataException("Missing manifest field.");
+        if (names.Count != (freshness is null ? 5 : 8)) throw new InvalidDataException("Missing manifest field.");
         var versionText = ReadString(root, "version");
         if (versionText.Length > 64 || !versionText.All(c => char.IsAsciiDigit(c) || c == '.') ||
             !Version.TryParse(versionText, out var version))
@@ -69,6 +89,33 @@ public static class UpdateVerifier
         try { signature = Convert.FromBase64String(ReadString(root, "signature")); }
         catch (FormatException error) { throw new InvalidDataException("Invalid base64 signature.", error); }
         var canonical = string.Join('\n', versionText, urlText, hashText.ToLowerInvariant(), size.ToString(CultureInfo.InvariantCulture));
+        long? metadataVersion = null; DateTimeOffset? expiresAtUtc = null;
+        var metadataDigest = Convert.ToHexString(SHA256.HashData(json)).ToLowerInvariant();
+        if (freshness is not null)
+        {
+            var counter = root.GetProperty("metadataVersion");
+            if (counter.ValueKind != JsonValueKind.Number || !counter.TryGetInt64(out var revision) || revision <= 0)
+                throw new InvalidDataException("Invalid metadata counter.");
+            var issuedText = ReadString(root, "issuedAtUtc");
+            var expiryText = ReadString(root, "expiresAtUtc");
+            if (!DateTimeOffset.TryParseExact(issuedText, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var issued)
+                || !DateTimeOffset.TryParseExact(expiryText, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var expiry))
+                throw new InvalidDataException("Metadata times must be UTC seconds.");
+            if (freshness.MinimumMetadataVersion < 0 || freshness.MaximumLifetime <= TimeSpan.Zero
+                || freshness.MaximumLifetime > TimeSpan.FromDays(7) || freshness.AllowedClockSkew < TimeSpan.Zero
+                || freshness.AllowedClockSkew > TimeSpan.FromMinutes(5)) throw new ArgumentException("Invalid freshness policy.");
+            if (freshness.LastTrustedUtc is { } previousTime && freshness.NowUtc < previousTime)
+                throw new InvalidDataException("Clock moved behind the last trusted update check.");
+            if (expiry <= issued || expiry - issued > freshness.MaximumLifetime || expiry <= freshness.NowUtc
+                || issued > freshness.NowUtc + freshness.AllowedClockSkew)
+                throw new InvalidDataException("Metadata is expired, future-dated or has an excessive lifetime.");
+            if (revision < freshness.MinimumMetadataVersion
+                || revision == freshness.MinimumMetadataVersion &&
+                   (freshness.TrustedMetadataSha256 is null || !metadataDigest.Equals(freshness.TrustedMetadataSha256, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("Metadata counter rollback or conflicting replay.");
+            canonical = string.Join('\n', "YUKAT-UPDATE-V2", canonical, issuedText, expiryText, revision.ToString(CultureInfo.InvariantCulture));
+            metadataVersion = revision; expiresAtUtc = expiry;
+        }
         using var rsa = RSA.Create();
         rsa.ImportFromPem(trustedPublicKeyPem);
         if (rsa.KeySize < 2048) throw new InvalidDataException("RSA keys must be at least 2048 bits.");
@@ -76,7 +123,7 @@ public static class UpdateVerifier
             throw new InvalidDataException("Manifest signature verification failed.");
         if (minimumExclusiveVersion is not null && version <= minimumExclusiveVersion)
             throw new InvalidDataException("Update is not newer than the trusted version floor.");
-        return new VerifiedManifest(version, url, Convert.FromHexString(hashText), size);
+        return new VerifiedManifest(version, url, Convert.FromHexString(hashText), size, metadataVersion, expiresAtUtc, freshness is null ? null : metadataDigest);
     }
 
     /// <summary>Hashes from the stream's current position through EOF. Does not execute or close it.</summary>

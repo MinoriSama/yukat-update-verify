@@ -3,9 +3,12 @@ using System.Text;
 using System.Text.Json;
 using Yukat.UpdateVerify;
 
+var fresh = args.FirstOrDefault() == "--fresh";
+if (fresh) args = args[1..];
+
 if (args.Length < 4 || args.Length > 5)
 {
-    Console.Error.WriteLine("Usage: update-verify <manifest.json> <trusted-public.pem> <package> <allowed-host[,host]> [minimum-exclusive-version]");
+    Console.Error.WriteLine("Usage: yukat-update-verify [--fresh] <manifest.json> <trusted-public.pem> <package> <allowed-host[,host]> [minimum-exclusive-version]");
     return 2;
 }
 try
@@ -14,7 +17,9 @@ try
     var bytes = await ReadBoundedAsync(args[0], UpdateVerifier.MaximumManifestBytes);
     var keyBytes = await ReadBoundedAsync(args[1], 16_384);
     var pem = Encoding.ASCII.GetString(keyBytes);
-    var manifest = UpdateVerifier.VerifyManifest(bytes, pem, args[3].Split(','), floor);
+    var manifest = fresh
+        ? UpdateVerifier.VerifyFreshManifest(bytes, pem, args[3].Split(','), new FreshnessPolicy(DateTimeOffset.UtcNow), floor)
+        : UpdateVerifier.VerifyManifest(bytes, pem, args[3].Split(','), floor);
     await using var package = new FileStream(args[2], FileMode.Open, FileAccess.Read, FileShare.Read,
         64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
     await UpdateVerifier.VerifyPackageAsync(manifest, package);

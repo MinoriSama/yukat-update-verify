@@ -12,6 +12,7 @@ try {
     $baseArgs = @('artifacts/example/manifest.json', 'artifacts/example/trusted-public.pem', 'artifacts/example/package.bin', 'updates.example.org')
     & dotnet $cli @baseArgs '1.2.2'
     if ($LASTEXITCODE -ne 0) { throw 'CLI positive case failed' }
+    $ErrorActionPreference = 'Continue'
     & dotnet $cli @baseArgs '1.2.3'
     if ($LASTEXITCODE -ne 1) { throw 'CLI accepted replay or used wrong exit code' }
     & dotnet $cli
@@ -30,7 +31,8 @@ try {
     & dotnet $cli $oversize $baseArgs[1] $baseArgs[2] $baseArgs[3]
     if ($LASTEXITCODE -ne 1) { throw 'CLI accepted oversized input' }
     Remove-Item -LiteralPath $oversize
+    $ErrorActionPreference = 'Stop'
     Write-Output 'CLI: 5/5 passed'
-    @{ checked_at_utc = [DateTime]::UtcNow.ToString('o'); sdk = (& dotnet --version); library_cases = 41; cli_cases = 5; result = 'passed' } |
+    @{ checked_at_utc = [DateTime]::UtcNow.ToString('o'); sdk = (& dotnet --version); library_cases = 56; cli_cases = 5; result = 'passed' } |
         ConvertTo-Json | Set-Content -Encoding UTF8 artifacts/validation.json
 } finally { Stop-Transcript | Out-Null }

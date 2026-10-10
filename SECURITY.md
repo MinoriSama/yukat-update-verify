@@ -11,3 +11,5 @@ The library bounds input acceptance; the caller must bound its own manifest down
 Verification applies to the open stream's bytes. Prevent replacement or modification between verification and installation; passing a path later to an installer is not sufficient protection by itself. No installer is launched by this tool. The console success message reports verification at that moment only.
 
 No production private key or customer record belongs in an issue or report. Report suspected vulnerabilities privately to [pierrotet@outlook.com](mailto:pierrotet@outlook.com). Include the affected version, reproduction steps and expected versus actual behavior; omit credentials and personal data. Never put credentials or an undisclosed exploit in a public issue.
+
+V2 freshness assumes protected caller-owned counter/digest/time state and a trustworthy clock. Missing or reset state cannot prove that metadata is the newest ever issued. Signed expiry detects replay after expiry; it cannot force an unavailable server to serve newer metadata. The V1 API intentionally has no expiry check. Root key rotation and TUF thresholds are not implemented; see docs/KEY-ROTATION.md.
