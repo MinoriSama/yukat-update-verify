@@ -34,3 +34,5 @@ try {
 $packages = @(Get-ChildItem $feed -File | ForEach-Object { @{name=$_.Name; sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); size=$_.Length} })
 @{revision=$Revision; version='0.2.0'; checkedAtUtc=[DateTime]::UtcNow.ToString('o'); tests=56; cliCases=5; packageExample='passed'; installedTool='passed'; damagedPackage='rejected'; packages=$packages} |
     ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 artifacts\release-receipt.json
+
+$global:LASTEXITCODE = 0

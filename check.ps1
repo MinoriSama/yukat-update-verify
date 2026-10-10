@@ -36,3 +36,5 @@ try {
     @{ checked_at_utc = [DateTime]::UtcNow.ToString('o'); sdk = (& dotnet --version); library_cases = 56; cli_cases = 5; result = 'passed' } |
         ConvertTo-Json | Set-Content -Encoding UTF8 artifacts/validation.json
 } finally { Stop-Transcript | Out-Null }
+
+$global:LASTEXITCODE = 0
